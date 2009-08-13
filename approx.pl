@@ -9,7 +9,14 @@ init_grammar :-
 	rule(t, [t, '*', f]),
 	rule(t, [f]),
 	rule(f, ['(',e,')']),
-	rule(f,[a]).
+	rule(f,[a]),
+	transform.
+	
+	
+test1 :- 
+	rule(t, [f]),
+	rule(f, [a]),
+	transform.
 	
 new_nonterminal(N,NPrime) :-
 	atom_concat(N, '_prime',NPrime).
@@ -33,18 +40,26 @@ rule(N,_,_) ==> nonterminal(N).
 % (only) Original nonterminals are primed
 nonterminal(N) ==> not(new_nonterminal(_,N)) | new_nonterminal(N,NPrime), prime(N,NPrime).
 
-rule(_,_,_) ==> transform.
+%rule(_,_,_) ==> transform.
 
 % Add epsilon rule for each primed nonterminal
 transform, prime(_,N) ==> rule(N, epsilon, transformed).
 
 % Create initial transformed rules
+
+% Rules which which are 
 transform, nonterminal(N1) \ rule(N, [N1], original) <=>
 	rule(N, [N1], transformed).
 
-transform, prime(N,NPrime) \ rule(N,RHS, original) <=>
-	append(RHS,[NPrime],RHSTransformed),
+% NPrime is added to original rules which are not right-recursive
+transform, prime(N,NPrime) \ rule(N,[S1,S2|RestRHS], original) <=>
+	write('two elements - add prime'),nl,
+	append([S1,S2|RestRHS],[NPrime],RHSTransformed),
 	rule(N,RHSTransformed,transformed).
+	
+transform, prime(N,NPrime), terminal(T) \ rule(N,[T], original) <=>
+	write('one elements - add prime'),nl,
+	rule(N,[T,NPrime],transformed).
 
 %% Base case:
 rule(N,[N1], transformed), prime(N,NPrime), prime(_,N1) ==>
