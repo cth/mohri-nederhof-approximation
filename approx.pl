@@ -97,10 +97,6 @@ transform, prime(N,NPrime) \ rule(N,[S1,S2|RestRHS], original) <=>
 transform, prime(N,NPrime), terminal(T) \ rule(N,[T], original) <=>
 	rule(N,[T,NPrime],transformed).
 
-%% Base case:
-rule(N,[N1], transformed), prime(N,NPrime), prime(_,N1) ==>
-	rule(NPrime, N1, transformed).
-
 % Recursion:
 terminal(T), nonterminal(N1), prime(N1,N1Prime) \ rule(N,[T,N1,R|Rest],transformed) <=>
 	rule(N,[T,N1],transformed),
