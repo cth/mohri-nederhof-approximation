@@ -1,0 +1,14 @@
+TODO:
+
+- Inference of accept states is not correct:
+
+- Grammars with two or more nonterminals in RHS not handled properly
+
+- DFA should be minimized after creation
+
+- HMM states with self-transitions and transitions to other states should be
+  split up into multiple states
+
+
+
+
