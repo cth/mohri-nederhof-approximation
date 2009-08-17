@@ -48,13 +48,14 @@ read_store_stream(S) <=> close(S).
 					notroot/1,
 					terminal_candidate/1,
 					transform/0,
-					finalize/0.
+					finalize/0,
+					next_new_nonterminal/1.
 					
-mohri_nederhof_transform :-	transform, finalize.					
+mohri_nederhof_transform :-	next_new_nonterminal(1), transform, finalize.
 	
-new_nonterminal(N,NPrime) :-
+primed_nonterminal(N,NPrime) :-
 	atom_concat(N, '_prime',NPrime).
-	
+
 rule(A,B) <=> rule(A,B,original).
 
 rule(A,B,C) \ rule(A,B,C) <=> true.
@@ -78,7 +79,7 @@ terminal(X) ==> notroot(X).
 notroot(N) \ root(N) <=> true.
 
 % (only) Original nonterminals are primed
-nonterminal(N) ==> not(new_nonterminal(_,N)) | new_nonterminal(N,NPrime), prime(N,NPrime), notroot(NPrime).
+nonterminal(N) ==> not(primed_nonterminal(_,N)) | primed_nonterminal(N,NPrime), prime(N,NPrime), notroot(NPrime).
 
 % Add epsilon rule for each primed nonterminal
 transform, prime(_,N) ==> rule(N, epsilon, transformed).
@@ -86,8 +87,10 @@ transform, prime(_,N) ==> rule(N, epsilon, transformed).
 % Create initial transformed rules
 
 % Preserve rules rewriting to just one nonterminal
-transform, nonterminal(N1) \ rule(N, [N1], original) <=>
-	rule(N, [N1], transformed).
+transform, nonterminal(N1),prime(N,NPrime) \ rule(N, [N1], original) <=>
+	rule(N, [N1,NPrime], transformed).
+
+%rule(s,[N],original) <=> rule(s,[N,s_prime],transformed).
 
 % NPrime is added to original rules which are not right-recursive
 transform, prime(N,NPrime) \ rule(N,[S1,S2|RestRHS], original) <=>
@@ -102,13 +105,24 @@ terminal(T), nonterminal(N1), prime(N1,N1Prime) \ rule(N,[T,N1,R|Rest],transform
 	rule(N,[T,N1],transformed),
 	rule(N1Prime,[R|Rest],transformed).
 	
-terminal(T), nonterminal(N1), prime(N1,N1Prime) \ rule(N,[N1,T|Rest],transformed) <=>
+nonterminal(N1), prime(N1,N1Prime) \ rule(N,[N1,NT|Rest],transformed) <=>
 	rule(N,[N1],transformed),
-	rule(N1Prime, [T|Rest], transformed).
-	
+	rule(N1Prime, [NT|Rest], transformed).
+
+% optimizations: keep new nonterminals to a minimum
+terminal(T1), terminal(T2), rule(N3,[T2],transformed) \ rule(N,[T1,T2|Rest],transformed) <=>
+		rule(N,[T1,N3|Rest],transformed).
+		
+next_new_nonterminal(Counter), terminal(T1), terminal(T2) \ rule(N,[T1,T2|Rest],transformed) <=>
+	atom_concat('uniq_nonterm',Counter,NewNonterm),
+	Next is Counter + 1,
+	rule(NewNonterm, [T1]),
+	notroot(NewNonterm),
+	next_new_nonterminal(Next),
+	rule(N,[T1,NewNonterm|Rest],transformed).
 	
 %% Finalize when all rules have been transformed
-finalize \ rule(X,Y,transformed) <=> rule(X,Y,final).
+finalize \ rule(X,Y,transformed) <=> write(rule(X,Y)), nl, rule(X,Y,final).
 	
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Convert grammmar to NFA
@@ -122,11 +136,13 @@ finalize \ rule(X,Y,transformed) <=> rule(X,Y,final).
 
 % Mark root as accepting
 mark_accepting @
-construct_nfa,root(N),prime(N,NPrime) \ rule(NPrime,epsilon,final) <=> 
+construct_nfa,root(N),prime(N,NPrime) \ rule(NPrime,epsilon,final) <=>
+	write(root), write(NPrime), nl,
 	nfa_accept_state(NPrime).
 
-construct_nfa \ rule(N,epsilon,final) <=> 
-	nfa_accept_state(N).
+
+%construct_nfa \ rule(N,epsilon,final) <=> 
+%	nfa_accept_state(N).
 
 construct_nfa, nonterminal(N1), nonterminal(N2) \ rule(N1,[N2],final) <=>
 	transition(epsilon,N1,N2).
@@ -271,6 +287,7 @@ dfa_report, dfa_transition(X,Y,Z) <=> assert(dfa(transition(X,Y,Z))), dfa_report
 dfa_report, dfa_start_state(State) <=> assert(dfa(start_state(State))), dfa_report.
 
 create_dfa(DFA) :-
+	chr_show_store(''),
 	dfa_report,
 	retractall(prev_nfa_state(_)),
 	assert(prev_nfa_state(0)),
@@ -285,27 +302,123 @@ viewdfa :-
     viewdot('dfa.dot').
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% DFA minimization
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+:- chr_constraint 	dfa_minimize/0,
+					dfa_state/1,
+					same/2,
+					different/2,
+					%dfa_accept_state/1, % Allready declared
+					dfa_non_accept_state/1,
+					state_order/2.
+
+% We use lexical order to impose order of states
+lexical_before([],[]) :- false, !.
+lexical_before([E1|_], [E2|_]) :- E1 < E2.
+lexical_before([E1|List1], [E2|List2]) :- E1 = E2, lexical_before(List1, List2).
+lexical_before([], [_|_]).
+lexical_before(A,B) :-
+	atom(A), atom(B),
+	atom_codes(A,ACodes),
+	atom_codes(B,BCodes),
+	lexical_before(ACodes, BCodes).
+
+% Duplicate removal
+dfa_minimize, dfa_transition(A,B,C) \ dfa_transition(A,B,C) <=> true.
+same(A,B) \ same(A,B) <=> true.
+dfa_state(A) \ dfa_state(A) <=> true.
+different(A,B) \ different(A,B) <=> true.
+dfa_non_accept_state(A) \ dfa_non_accept_state(A) <=> true.
+
+% Symmetric 
+same(A,B) ==> same(B,A).
+different(A,B) ==> different(B,A).
+
+% Two states that are different cannot be the same
+different(A,B) \ same(A,B) <=> true.
+
+% Infer states
+dfa_minimize, dfa_transition(_,A,B) ==> dfa_state(A), dfa_state(B).
+
+% This will produce O(n^2) state_order contraints, but allow constant-time
+% matching for other central rules
+dfa_state(A), dfa_state(B) ==> lexical_before(A,B) | state_order(A,B).
+
+% Assume all states are the same
+state_order(A,B), dfa_state(A), dfa_state(B) ==> same(A,B).
+
+% Assume all states are dfa_non_accept_state
+dfa_state(A) ==> dfa_non_accept_state(A).
+
+% If a state is dfa_accept_state, then it cannot be non-dfa_accept_state
+dfa_accept_state(A)  \ dfa_non_accept_state(A) <=> true.
+
+% If one state is dfa_accept_state and another is not, they must be different
+dfa_accept_state(A), dfa_non_accept_state(B) \ same(A,B) <=> different(A,B).
+dfa_accept_state(B), dfa_non_accept_state(A) \ same(A,B) <=> different(A,B).
+
+% separate any two states which has a dfa_transitionition on the same synbol to two states which are separated
+dfa_transition(Symbol,A,B), dfa_transition(Symbol,C,D), different(B,D), same(A,C) <=> different(A,C).
+
+% Collapse states (represented by their dfa_transitionitions) which are the same
+state_order(A,B), same(A,B) \ dfa_transition(Symbol,B,C) <=> dfa_transition(Symbol, A, C).
+state_order(A,B), same(A,B) \ dfa_transition(Symbol,C,B) <=> dfa_transition(Symbol, C, A).
+
+% Remove transitions from/to states which has been removed
+dfa_transition(_,A,B), state_order(A,B) \ dfa_state(B) <=> true.
+dfa_transition(_,B,A), state_order(A,B) \ dfa_state(B) <=> true.
+
+% Clean-up store when done
+same(_,_) <=> true.
+different(_,_) <=> true.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Create Hidden Markov Model based on DFA
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 :- chr_constraint 
 	create_hmm/0,
 	write_simple_hmm_to_file/1,
+	state_inserted/2,
 	trans/3,
 	emit/3.
 	
 trans(A,B,C) \ trans(A,B,C) <=> true.
 
+state_inserted(NewState, OldState), dfa_transition(S,SomeState,OldState) ==>
+	SomeState \= OldState
+	|
+	dfa_transition(S,SomeState,NewState).
+	
+state_inserted(NewState1, OldState), state_inserted(NewState2, OldState) ==>
+	atom_concat('dfa_', ShortNew1, NewState1),
+	atom_concat('dfa_', ShortNew2, NewState2),
+	trans(ShortNew1, ShortNew2, unknown),
+	trans(ShortNew2, ShortNew1, unknown).
+
+create_hmm, dfa_transition(_,Org,_) \ dfa_transition(S,Org,Org) <=>
+	new_dfa_state(New),
+	atom_concat('dfa_', ShortNew, New),
+	atom_concat('dfa_', ShortOrg, Org),
+	trans(ShortNew,ShortNew,unknown),
+	trans(ShortNew, ShortOrg, unknown),
+	trans(ShortOrg, ShortNew, unknown),
+	emit(ShortNew, S, unknown),
+	state_inserted(Org,New).
+	
 create_hmm, dfa_transition(_,_,S) \ dfa_accept_state(S) <=>
 	atom_concat('dfa_', Short, S),
 	trans(Short, end, unknown).
 
 create_hmm \ dfa_transition(Symbol, From, To) <=>
+	write(dfa_transition(Symbol, From, To)),nl
+	|
 	atom_concat('dfa_', ShortFrom, From),
 	atom_concat('dfa_', ShortTo, To),
 	emit(ShortFrom, Symbol, unknown),
 	trans(ShortFrom, ShortTo, unknown).
-	
+
 create_hmm \ dfa_start_state(S) <=>
 	atom_concat('dfa_', Short, S),
 	trans(start, Short, unknown).
@@ -434,6 +547,7 @@ test4 :-
 	retractall(prev_dfa_state(_)),
 	test2,
 	dfa_start(s),
+	dfa_minimize,
 	viewdfa.
 
 test5 :-
@@ -454,3 +568,31 @@ test6 :-
 
 test7 :-
 	cfg_to_prism_program_hmm('sample_grammar.pl', 'generated_test_hmm.pl').
+	
+test8 :-
+	retractall(nfa(_)),
+	retractall(dfa(_)),
+	retractall(prev_nfa_state(_)),
+	retractall(prev_dfa_state(_)),
+	rule(s,[s2]),
+	rule(s2,[s3]),
+	rule(s3,[s4]),
+	rule(s4, [t,t,t]),
+	mohri_nederhof_transform,
+	construct_nfa,
+	nfa_report,
+	viewnfa.
+	
+test9 :-
+	retractall(nfa(_)),
+	retractall(dfa(_)),
+	retractall(prev_nfa_state(_)),
+	retractall(prev_dfa_state(_)),
+	rule(s,[s2]),
+	rule(s2,[s3]),
+	rule(s3,[s4]),
+	rule(s4, [t,t,t]),
+	mohri_nederhof_transform,
+	construct_nfa,
+	dfa_start(s),
+	viewdfa.
