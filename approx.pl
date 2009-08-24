@@ -23,6 +23,7 @@ create_hidden_markov_model :-
 	mohri_nederhof_transform,
 	construct_nfa,
 	dfa_start(s), % FIXME: get from constraint-store
+	dfa_minimize,
 	create_hmm.
 	
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -137,18 +138,24 @@ finalize \ rule(X,Y,transformed) <=> write(rule(X,Y)), nl, rule(X,Y,final).
 % Mark root as accepting
 mark_accepting @
 construct_nfa,root(N),prime(N,NPrime) \ rule(NPrime,epsilon,final) <=>
-	write(root), write(NPrime), nl,
+	write('root: '), write(NPrime), nl,
 	nfa_accept_state(NPrime).
-
 
 %construct_nfa \ rule(N,epsilon,final) <=> 
 %	nfa_accept_state(N).
 
-construct_nfa, nonterminal(N1), nonterminal(N2) \ rule(N1,[N2],final) <=>
+construct_nfa, nonterminal(N2) \ rule(N1,[N2],final) <=>
 	transition(epsilon,N1,N2).
 
-construct_nfa, nonterminal(N), nonterminal(N1), terminal(T) \ rule(N, [T,N1], final) <=>
+construct_nfa, nonterminal(N1), terminal(T) \ rule(N, [T,N1], final) <=>
 	transition(T,N,N1).
+
+	
+construct_nfa, rule(N, [E|Rest], final) <=>
+	write('-----------------------------'),nl,
+ 	write('ERROR: non-caught rule: '),
+	write(rule(N,[E|Rest])), nl, chr_show_store(''), 
+	write('-----------------------------'),nl.	
 
 report_accepting @
 nfa_report, transition(Symbol, From, To), nfa_accept_state(To) <=>
@@ -397,13 +404,30 @@ state_inserted(NewState1, OldState), state_inserted(NewState2, OldState) ==>
 	trans(ShortNew1, ShortNew2, unknown),
 	trans(ShortNew2, ShortNew1, unknown).
 
+% If the original state cannot emit the symbol anymore, then 
+/*
+create_hmm, dfa_transition(_,Org,_) \ dfa_transition(S,Org,Org) <=>
+	new_dfa_state(New1),
+	new_dfa_state(New2),	
+	atom_concat('dfa_', ShortNew1, New1),
+	atom_concat('dfa_', ShortNew2, New2),	
+	atom_concat('dfa_', ShortOrg, Org),
+	trans(ShortNew1, ShortOrg, unknown),
+	trans(ShortOrg, ShortNew1, unknown),
+	trans(ShortNew1,ShortNew2,unknown),
+	trans(ShortNew2,ShortNew1,unknown),
+	emit(ShortNew1, S, unknown),
+	emit(ShortNew2, S, unknown),
+	state_inserted(Org,New).
+*/
+
 create_hmm, dfa_transition(_,Org,_) \ dfa_transition(S,Org,Org) <=>
 	new_dfa_state(New),
 	atom_concat('dfa_', ShortNew, New),
 	atom_concat('dfa_', ShortOrg, Org),
-	trans(ShortNew,ShortNew,unknown),
 	trans(ShortNew, ShortOrg, unknown),
 	trans(ShortOrg, ShortNew, unknown),
+	trans(ShortNew,ShortNew, unknown),
 	emit(ShortNew, S, unknown),
 	state_inserted(Org,New).
 	
@@ -595,4 +619,16 @@ test9 :-
 	mohri_nederhof_transform,
 	construct_nfa,
 	dfa_start(s),
+	dfa_minimize,
 	viewdfa.
+
+test10 :-
+	rule(s, [b]),
+	rule(b,[a]),
+%	rule(b, [a,B]),
+	rule(b, [b]),
+	transform,
+	finalize,
+	construct_nfa,
+	nfa_report,
+	viewnfa.
